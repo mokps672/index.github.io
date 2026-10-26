@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>智能燈專案 - 網頁相機測光器</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Inter & Noto Sans TC Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    /* 數字平滑過渡 */
+    .num-transition {
+      transition: all 0.3s ease-out;
+    }
+    /* 鎖定時的閃爍視覺提醒 */
+    @keyframes pulse-border {
+      0%, 100% { border-color: #ef4444; }
+      50% { border-color: #fca5a5; }
+    }
+    .frozen-border {
+      animation: pulse-border 1.5s infinite;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex flex-col justify-between p-4 selection:bg-none select-none">
+
+  <!-- 頂部標題區 -->
+  <header class="text-center pt-2 pb-1">
+    <div class="inline-flex items-center gap-2 bg-slate-800/80 px-4 py-1.5 rounded-full border border-slate-700">
+      <span class="text-xl">💡</span>
+      <h1 class="text-lg md:text-xl font-bold tracking-wide text-slate-200">智能燈專案：光線偵探</h1>
+    </div>
+  </header>
+
+  <!-- 主要數據顯示核心區 -->
+  <main class="flex-1 flex flex-col items-center justify-center my-2 gap-4">
+    
+    <!-- 主卡片：顯示光線強度數字與狀態 -->
+    <div id="mainCard" class="w-full max-w-sm bg-slate-800/90 rounded-3xl p-6 text-center border-4 border-slate-700 shadow-2xl transition-all duration-500 relative overflow-hidden">
+      
+      <!-- 鎖定狀態提示條 -->
+      <div id="freezeBadge" class="hidden absolute top-3 left-1/2 -translate-x-1/2 bg-red-500/90 text-white font-bold text-xs px-3 py-1 rounded-full shadow-lg items-center gap-1">
+        <span>⏸️ 數值已鎖定 (冷凍中)</span>
+      </div>
+
+      <!-- 狀態圖示與文字標籤 -->
+      <div id="statusContainer" class="mt-2 mb-1 flex items-center justify-center gap-2">
+        <span id="statusIcon" class="text-4xl md:text-5xl">📷</span>
+        <span id="statusText" class="text-xl md:text-2xl font-black text-slate-300">準備啟動中...</span>
+      </div>
+
+      <!-- 巨型數字顯示區域 -->
+      <div class="my-2 relative flex items-center justify-center">
+        <span id="brightnessValue" class="text-7xl md:text-8xl font-black tracking-tight num-transition font-mono text-yellow-400">
+          --
+        </span>
+        <span class="text-2xl font-bold text-slate-400 ml-1 self-end mb-3">%</span>
+      </div>
+
+      <!-- 輔助說明文字 -->
+      <p id="subHint" class="text-sm font-bold text-slate-400 bg-slate-900/50 py-1.5 px-3 rounded-xl border border-slate-700/50 inline-block">
+        請將相機對準要測量的地方
+      </p>
+    </div>
+
+    <!-- 即時相機預覽小視窗 (讓學生知道相機對準哪裡) -->
+    <div class="w-full max-w-sm flex items-center justify-between bg-slate-800/60 p-2.5 rounded-2xl border border-slate-700/60">
+      <div class="flex items-center gap-2">
+        <div class="relative w-16 h-12 bg-black rounded-lg overflow-hidden border border-slate-600">
+          <video id="video" autoplay playsinline webkit-playsinline muted class="w-full h-full object-cover"></video>
+          <!-- 畫素分析用的隱藏 Canvas -->
+          <canvas id="canvas" class="hidden"></canvas>
+        </div>
+        <span class="text-xs font-bold text-slate-300">📷 鏡頭畫面畫面</span>
+      </div>
+      
+      <!-- 前後鏡頭切換按鈕 -->
+      <button id="switchCamBtn" onclick="toggleCamera()" class="bg-slate-700 active:bg-slate-600 text-slate-200 px-3 py-2 rounded-xl text-xs font-bold border border-slate-600 flex items-center gap-1">
+        🔄 切換鏡頭
+      </button>
+    </div>
+
+  </main>
+
+  <!-- 底部巨型操作按鈕區 (針對觸控優化) -->
+  <footer class="w-full max-w-sm mx-auto pb-2 flex flex-col gap-3">
+    
+    <!-- 啟動相機按鈕 (若 iOS 阻止自動播放時顯示) -->
+    <button id="startBtn" onclick="initCamera()" class="w-full py-5 rounded-2xl bg-emerald-500 active:bg-emerald-600 text-white font-black text-2xl shadow-lg border-b-4 border-emerald-700 flex items-center justify-center gap-2 transition-transform active:scale-95">
+      <span>🚀 開啟相機開始測量</span>
+    </button>
+
+    <!-- 鎖定 / 繼續 測量按鈕 -->
+    <button id="holdBtn" onclick="toggleFreeze()" disabled class="w-full py-5 rounded-2xl bg-amber-500 active:bg-amber-600 text-slate-950 font-black text-2xl shadow-xl border-b-4 border-amber-700 flex items-center justify-center gap-2 transition-transform active:scale-95 opacity-50 cursor-not-allowed">
+      <span id="holdBtnIcon">⏸️</span>
+      <span id="holdBtnText">鎖定數值 (方便抄寫)</span>
+    </button>
+
+  </footer>
+
+  <!-- 提示訊息彈窗 (代替 alert) -->
+  <div id="errorModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div class="bg-slate-800 border-2 border-red-500 rounded-3xl p-6 max-w-xs text-center shadow-2xl">
+      <div class="text-4xl mb-2">⚠️</div>
+      <h3 class="text-xl font-bold text-white mb-2" id="errorTitle">無法存取相機</h3>
+      <p class="text-sm text-slate-300 mb-6" id="errorMessage">請允許瀏覽器使用相機權限，並確保使用 Safari 開啟。</p>
+      <button onclick="closeErrorModal()" class="w-full py-3 bg-slate-700 active:bg-slate-600 text-white font-bold rounded-xl border border-slate-500">
+        我知道了
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // 狀態變數
+    let currentFacingMode = 'environment'; // 預設使用後置鏡頭
+    let mediaStream = null;
+    let isFrozen = false;
+    let frozenValue = 0;
+    let animFrameId = null;
+
+    // DOM 元素引用
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    
+    const brightnessValueEl = document.getElementById('brightnessValue');
+    const statusIconEl = document.getElementById('statusIcon');
+    const statusTextEl = document.getElementById('statusText');
+    const subHintEl = document.getElementById('subHint');
+    const mainCard = document.getElementById('mainCard');
+    const freezeBadge = document.getElementById('freezeBadge');
+    
+    const startBtn = document.getElementById('startBtn');
+    const holdBtn = document.getElementById('holdBtn');
+    const holdBtnIcon = document.getElementById('holdBtnIcon');
+    const holdBtnText = document.getElementById('holdBtnText');
+
+    // 啟動相機
+    async function initCamera() {
+      stopCamera();
+
+      const constraints = {
+        video: {
+          facingMode: currentFacingMode,
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        },
+        audio: false
+      };
+
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = mediaStream;
+        
+        // 確保 iOS Safari 上順暢播放
+        video.setAttribute('playsinline', '');
+        video.setAttribute('webkit-playsinline', '');
+        await video.play();
+
+        // 隱藏啟動按鈕，啟用鎖定按鈕
+        startBtn.classList.add('hidden');
+        holdBtn.disabled = false;
+        holdBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+
+        // 開始不間斷分析光度
+        processVideoFrame();
+      } catch (err) {
+        console.error('Camera Access Error:', err);
+        
+        // 嘗試退回不指定 facingMode 的基本設定
+        if (currentFacingMode === 'environment') {
+          currentFacingMode = 'user';
+          try {
+            mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            video.srcObject = mediaStream;
+            await video.play();
+            startBtn.classList.add('hidden');
+            holdBtn.disabled = false;
+            holdBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            processVideoFrame();
+            return;
+          } catch (e) {
+            showError('相機啟動失敗', '請確定已在 iPad 設定中給予 Safari 相機存取權限。');
+          }
+        } else {
+          showError('無法讀取相機', '請檢查 iPad 相機權限，或嘗試重新整理頁面。');
+        }
+      }
+    }
+
+    // 停止相機串流
+    function stopCamera() {
+      if (animFrameId) {
+        cancelAnimationFrame(animFrameId);
+      }
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream = null;
+      }
+    }
+
+    // 切換前後鏡頭
+    function toggleCamera() {
+      currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment';
+      initCamera();
+    }
+
+    // 計算視訊訊號的即時亮度
+    function processVideoFrame() {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        // 使用小尺寸 canvas 進行即時計算以提升性能
+        canvas.width = 160;
+        canvas.height = 120;
+        
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        let totalLuminance = 0;
+        const totalPixels = data.length / 4;
+
+        // 計算整體感知亮度 (Standard RGB Luminance)
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          totalLuminance += (0.299 * r + 0.587 * g + 0.114 * b);
+        }
+
+        const avgLuminance = totalLuminance / totalPixels;
+        // 將 0-255 轉換為百分比 (0 - 100)
+        const brightnessPercent = Math.round((avgLuminance / 255) * 100);
+
+        if (!isFrozen) {
+          updateUI(brightnessPercent);
+        }
+      }
+
+      animFrameId = requestAnimationFrame(processVideoFrame);
+    }
+
+    // 更新介面 UI 與主題顏色
+    function updateUI(val) {
+      brightnessValueEl.innerText = val;
+
+      if (val <= 20) {
+        // 🌙 全黑 / 很暗
+        statusIconEl.innerText = '🌙';
+        statusTextEl.innerText = '全黑 / 很暗';
+        statusTextEl.className = 'text-xl md:text-2xl font-black text-indigo-300';
+        subHintEl.innerText = '適合做：自動啟動夜燈！';
+        
+        mainCard.className = 'w-full max-w-sm bg-indigo-950/90 rounded-3xl p-6 text-center border-4 border-indigo-600 shadow-2xl transition-all duration-500 relative overflow-hidden';
+        brightnessValueEl.className = 'text-7xl md:text-8xl font-black tracking-tight num-transition font-mono text-indigo-400';
+      
+      } else if (val <= 60) {
+        // ⛅ 昏暗 / 適中
+        statusIconEl.innerText = '⛅';
+        statusTextEl.innerText = '昏暗 / 適中';
+        statusTextEl.className = 'text-xl md:text-2xl font-black text-amber-300';
+        subHintEl.innerText = '微弱光線，可能需要補光';
+        
+        mainCard.className = 'w-full max-w-sm bg-amber-950/80 rounded-3xl p-6 text-center border-4 border-amber-600 shadow-2xl transition-all duration-500 relative overflow-hidden';
+        brightnessValueEl.className = 'text-7xl md:text-8xl font-black tracking-tight num-transition font-mono text-amber-400';
+      
+      } else {
+        // ☀️ 明亮
+        statusIconEl.innerText = '☀️';
+        statusTextEl.innerText = '環境明亮';
+        statusTextEl.className = 'text-xl md:text-2xl font-black text-yellow-300';
+        subHintEl.innerText = '光線充足，不需要開燈';
+        
+        mainCard.className = 'w-full max-w-sm bg-slate-800/95 rounded-3xl p-6 text-center border-4 border-yellow-500 shadow-2xl transition-all duration-500 relative overflow-hidden';
+        brightnessValueEl.className = 'text-7xl md:text-8xl font-black tracking-tight num-transition font-mono text-yellow-400';
+      }
+    }
+
+    // 凍結/解鎖數值（方便學生拿出來抄寫）
+    function toggleFreeze() {
+      isFrozen = !isFrozen;
+
+      if (isFrozen) {
+        // 進入鎖定狀態
+        freezeBadge.classList.remove('hidden');
+        freezeBadge.classList.add('flex');
+        mainCard.classList.add('frozen-border');
+        
+        holdBtn.classList.remove('bg-amber-500', 'active:bg-amber-600', 'border-amber-700');
+        holdBtn.classList.add('bg-emerald-500', 'active:bg-emerald-600', 'border-emerald-700');
+        
+        holdBtnIcon.innerText = '▶️';
+        holdBtnText.innerText = '繼續測量';
+      } else {
+        // 恢復即時測量
+        freezeBadge.classList.add('hidden');
+        freezeBadge.classList.remove('flex');
+        mainCard.classList.remove('frozen-border');
+        
+        holdBtn.classList.remove('bg-emerald-500', 'active:bg-emerald-600', 'border-emerald-700');
+        holdBtn.classList.add('bg-amber-500', 'active:bg-amber-600', 'border-amber-700');
+        
+        holdBtnIcon.innerText = '⏸️';
+        holdBtnText.innerText = '鎖定數值 (方便抄寫)';
+      }
+    }
+
+    // 自訂錯誤提示視窗
+    function showError(title, msg) {
+      document.getElementById('errorTitle').innerText = title;
+      document.getElementById('errorMessage').innerText = msg;
+      document.getElementById('errorModal').classList.remove('hidden');
+    }
+
+    function closeErrorModal() {
+      document.getElementById('errorModal').classList.add('hidden');
+    }
+
+    // 頁面載入時自動嘗試啟動相機
+    window.addEventListener('load', () => {
+      initCamera();
+    });
+  </script>
+</body>
+</html>
